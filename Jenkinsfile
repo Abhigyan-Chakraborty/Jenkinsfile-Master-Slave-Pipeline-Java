@@ -2,50 +2,63 @@ pipeline {
     agent none
 
     environment {
-        // Define these globally if needed
         WAR_NAME = "my-webapp.war"
         CONTEXT_PATH = "/hello-world"
         TOMCAT_URL = "http://localhost:8082/manager/text/deploy"
     }
 
     stages {
-        stage('Checkout on Master') {
+        stage('Build on Master') {
             agent { label 'master' }
-            steps {
-                checkout scm
+            stages {
+                stage('Checkout') {
+                    steps {
+                        checkout scm
+                    }
+                }
+                stage('Build WAR') {
+                    steps {
+                        bat 'mvn clean package -DskipTests=true'
+                    }
+                }
+                stage('Archive WAR') {
+                    steps {
+                        archiveArtifacts artifacts: "target/${env.WAR_NAME}", fingerprint: true
+                    }
+                }
             }
         }
 
-        stage('Build on Windows Slave') {
-            agent { label 'Windows_Node' }
-            steps {
-                bat 'mvn clean package -DskipTests=false'
-            }
-        }
+        stage('Test and Deploy on Windows-Node') {
+            agent { label 'Windows-Node' }
+            stages {
+                stage('Get WAR from Master') {
+                    steps {
+                        unstash 'archive'
+                    }
+                }
 
-        stage('Test on Windows Slave') {
-            agent { label 'Windows_Node' }
-            steps {
-                bat 'mvn test'
-            }
-        }
+                stage('Test WAR') {
+                    steps {
+                        bat 'mvn test'
+                    }
+                }
 
-        stage('Deploy from Windows Slave') {
-            agent { label 'Windows_Node' }
-            steps {
-                script {
-                    def warPath = "target/${env.WAR_NAME}"
-
-                    withCredentials([usernamePassword(
-                        credentialsId: 'tomcat-deployer-creds',
-                        usernameVariable: 'TOMCAT_USER',
-                        passwordVariable: 'TOMCAT_PASS'
-                    )]) {
-                        bat """
-                            curl -v -u %TOMCAT_USER%:%TOMCAT_PASS% ^
-                            --upload-file "${warPath}" ^
-                            "${env.TOMCAT_URL}?path=${env.CONTEXT_PATH}&update=true"
-                        """
+                stage('Deploy to Tomcat') {
+                    steps {
+                        script {
+                            withCredentials([usernamePassword(
+                                credentialsId: 'tomcat-deployer-creds',
+                                usernameVariable: 'TOMCAT_USER',
+                                passwordVariable: 'TOMCAT_PASS'
+                            )]) {
+                                bat """
+                                    curl -v -u %TOMCAT_USER%:%TOMCAT_PASS% ^
+                                    --upload-file "target\\${env.WAR_NAME}" ^
+                                    "${env.TOMCAT_URL}?path=${env.CONTEXT_PATH}&update=true"
+                                """
+                            }
+                        }
                     }
                 }
             }
@@ -54,10 +67,10 @@ pipeline {
 
     post {
         success {
-            echo '✅ Build, Test, and Deployment completed successfully.'
+            echo "✅ Build, test, and deploy completed successfully!"
         }
         failure {
-            echo '❌ Build failed or deployment issue.'
+            echo "❌ Something went wrong during the pipeline."
         }
     }
 }
