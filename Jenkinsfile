@@ -1,37 +1,50 @@
 pipeline {
-    agent any
+    agent none
+
+    environment {
+        // Define these globally if needed
+        WAR_NAME = "my-webapp.war"
+        CONTEXT_PATH = "/hello-world"
+        TOMCAT_URL = "http://localhost:8082/manager/text/deploy"
+    }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout on Master') {
+            agent { label 'master' }
             steps {
-                git url: 'https://github.com/Abhigyan-Chakraborty/Jenkins-Pipelined-Master-Java.git', branch: 'main'
+                checkout scm
             }
         }
 
-        stage('Build WAR') {
+        stage('Build on Windows Slave') {
+            agent { label 'Windows_Node' }
             steps {
                 bat 'mvn clean package -DskipTests=false'
             }
         }
 
-        stage('Run Tests') {
+        stage('Test on Windows Slave') {
+            agent { label 'Windows_Node' }
             steps {
                 bat 'mvn test'
             }
         }
 
-        stage('Deploy to Tomcat') {
+        stage('Deploy from Windows Slave') {
+            agent { label 'Windows_Node' }
             steps {
                 script {
-                    def warFile = "target/my-webapp.war"
-                    def tomcatUrl = 'http://localhost:8082/manager/text/deploy'
-                    def contextPath = '/myapp' // You can use '' for ROOT
+                    def warPath = "target/${env.WAR_NAME}"
 
-                    withCredentials([usernamePassword(credentialsId: 'tomcat-deployer-creds', usernameVariable: 'TOMCAT_USER', passwordVariable: 'TOMCAT_PASS')]) {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'tomcat-deployer-creds',
+                        usernameVariable: 'TOMCAT_USER',
+                        passwordVariable: 'TOMCAT_PASS'
+                    )]) {
                         bat """
                             curl -v -u %TOMCAT_USER%:%TOMCAT_PASS% ^
-                            --upload-file "${warFile}" ^
-                            "${tomcatUrl}?path=${contextPath}&update=true"
+                            --upload-file "${warPath}" ^
+                            "${env.TOMCAT_URL}?path=${env.CONTEXT_PATH}&update=true"
                         """
                     }
                 }
@@ -41,10 +54,10 @@ pipeline {
 
     post {
         success {
-            echo '✅ Build, test, and deployment completed successfully.'
+            echo '✅ Build, Test, and Deployment completed successfully.'
         }
         failure {
-            echo '❌ Something went wrong.'
+            echo '❌ Build failed or deployment issue.'
         }
     }
 }
